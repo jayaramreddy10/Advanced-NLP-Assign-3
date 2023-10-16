@@ -54,9 +54,9 @@ def collate_fn(batch):
 SOS_IDX = 0
 EOS_IDX = 1
 PAD_IDX = 2
-MAX_PADDING = 20
+MAX_PADDING = 100
 
-def generate_batch(data_batch):
+def collate_batch(data_batch):
 
   eng_batch, fr_batch = [], []
 
@@ -145,10 +145,10 @@ class Trainer_transformer_jayaram(object):
         #     self.train_dataset, batch_size=train_batch_size, collate_fn = collate_fn, num_workers=1, shuffle=True, pin_memory=True
         # ))
         self.train_dataloader = cycle(torch.utils.data.DataLoader(to_map_style_dataset(self.train_dataset), batch_size=train_batch_size,
-                        shuffle=True, drop_last=True, collate_fn=generate_batch))
+                        shuffle=True, drop_last=True, collate_fn=collate_batch))
 
-        self.val_dataloader = cycle(torch.utils.data.DataLoader(to_map_style_dataset(self.val_dataset), batch_size=train_batch_size,
-                        shuffle=True, drop_last=True, collate_fn=generate_batch))
+        self.val_dataloader = torch.utils.data.DataLoader(to_map_style_dataset(self.val_dataset), batch_size=train_batch_size,
+                        shuffle=True, drop_last=True, collate_fn=collate_batch)
         
         # self.dataloader_vis = cycle(torch.utils.data.DataLoader(
         #     self.dataset, batch_size=1, num_workers=0, shuffle=True, pin_memory=True
@@ -162,7 +162,7 @@ class Trainer_transformer_jayaram(object):
         self.bucket = bucket
         self.n_reference = n_reference
         self.n_samples = n_samples
-        self.criterion = nn.CrossEntropyLoss() #nn.CrossEntropyLoss(ignore_index = 2)  # Mean Squared Error loss
+        self.criterion = nn.CrossEntropyLoss(ignore_index = 2) #nn.CrossEntropyLoss(ignore_index = 2)  # Mean Squared Error loss
         self.reset_parameters()
         self.step = 0
 
@@ -195,13 +195,14 @@ class Trainer_transformer_jayaram(object):
                 batch = next(self.train_dataloader)   #add collate fn here (not necessary, handled in __get_item itself)
                 src, trg = batch
 
-                src = to_device(src)
-                trg = to_device(trg)
+                src = to_device(src)   #(batch_size, 100)
+                trg = to_device(trg)   #(batch_size, 100)
                 
-                logits = self.model(src, trg[:,:-1])   
-
+                logits = self.model(src, trg[:,:-1])    #trg[:,:-1]: (99, ) whereas trg: (100, )
+                #(b_size, trg_seq_len=99, trg_vocab_size)
+ 
                 # expected output
-                expected_output = trg[:,1:]
+                expected_output = trg[:,1:]   #(b_size, trg_seq_len)
 
                 # calculate the loss
                 loss = self.criterion(logits.contiguous().view(-1, logits.shape[-1]), 

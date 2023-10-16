@@ -37,7 +37,7 @@ from Trainer_transformer import Trainer_transformer_jayaram
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 # wandb setup
-number = 1
+number = 2
 NAME = "model_dropout_02_" + str(number)
 ID = 'Transformer_training_' + str(number)
 run = wandb.init(project='Transformer_training', name = NAME, id = ID)
@@ -101,7 +101,6 @@ def tokenize(text: str, tokenizer):
     return [tok.text.lower() for tok in tokenizer.tokenizer(text)]
 
 def build_vocabulary(train, val, test, spacy_eng, spacy_fr, min_freq: int = 2, index: int = 0):
-  
   def tokenize_eng(text: str):
     return tokenize(text, spacy_eng)    #returns list of strings
 
@@ -234,54 +233,54 @@ class MultiHeadAttention(nn.Module):
     batch_size = key.size(0)                  
         
     # calculate query, key, and value tensors
-    Q = self.Wq(query)                       # (32, 10, 512) x (512, 512) = (32, 10, 512)
-    K = self.Wk(key)                         # (32, 10, 512) x (512, 512) = (32, 10, 512)
-    V = self.Wv(value)                       # (32, 10, 512) x (512, 512) = (32, 10, 512)
+    Q = self.Wq(query)                       # (64, 100, 256) x (256, 256) = (64, 100, 256)
+    K = self.Wk(key)                         # (64, 100, 256) x (256, 256) = (64, 100, 256)
+    V = self.Wv(value)                       # (64, 100, 256) x (256, 256) = (64, 100, 256)
 
     # split each tensor into n-heads to compute attention
 
     # query tensor
-    Q = Q.view(batch_size,                   # (32, 10, 512) -> (32, 10, 8, 64) 
+    Q = Q.view(batch_size,                   # (64, 100, 256) -> (64, 100, 8, 32) 
                -1,                           # -1 = q_length
                self.n_heads,              
-               self.d_key
-               ).permute(0, 2, 1, 3)         # (32, 10, 8, 64) -> (32, 8, 10, 64) = (batch_size, n_heads, q_length, d_key)
+               self.d_key  #32
+               ).permute(0, 2, 1, 3)         # (64, 100, 8, 32)  -> (64, 8, 100, 32) = (batch_size, n_heads, q_length, d_key)
     # key tensor
-    K = K.view(batch_size,                   # (32, 10, 512) -> (32, 10, 8, 64) 
-               -1,                           # -1 = k_length
+    K = K.view(batch_size,                   
+               -1,                           
                self.n_heads,              
                self.d_key
-               ).permute(0, 2, 1, 3)         # (32, 10, 8, 64) -> (32, 8, 10, 64) = (batch_size, n_heads, k_length, d_key)
+               ).permute(0, 2, 1, 3)         # (64, 100, 8, 32)  -> (64, 8, 100, 32) = (batch_size, n_heads, k_length, d_key)
     # value tensor
-    V = V.view(batch_size,                   # (32, 10, 512) -> (32, 10, 8, 64) 
-               -1,                           # -1 = v_length
+    V = V.view(batch_size,                   
+               -1,                           
                self.n_heads, 
                self.d_key
-               ).permute(0, 2, 1, 3)         # (32, 10, 8, 64) -> (32, 8, 10, 64) = (batch_size, n_heads, v_length, d_key)
+               ).permute(0, 2, 1, 3)         # (64, 100, 8, 32)  -> (64, 8, 100, 32) = (batch_size, n_heads, v_length, d_key)
        
     # computes attention
     # scaled dot product -> QK^{T}
-    scaled_dot_prod = torch.matmul(Q,        # (32, 8, 10, 64) x (32, 8, 64, 10) -> (32, 8, 10, 10) = (batch_size, n_heads, q_length, k_length)
+    scaled_dot_prod = torch.matmul(Q,        # (64, 8, 100, 32) x (64, 8, 32, 100) -> (64, 8, 100, 100) = (batch_size, n_heads, q_length, k_length)
                                    K.permute(0, 1, 3, 2)
                                    ) / math.sqrt(self.d_key)      # sqrt(64)
         
     # fill those positions of product as (-1e10) where mask positions are 0
-    if mask is not None:
+    if mask is not None:   #shape: (64, 1, 99, 99) for masked attention  and (64, 1, 1, 100) for self and cross attention which is unmasked (just for padding)
       scaled_dot_prod = scaled_dot_prod.masked_fill(mask == 0, -1e10)
 
     # apply softmax 
     attn_probs = torch.softmax(scaled_dot_prod, dim=-1)
         
     # multiply by values to get attention
-    A = torch.matmul(self.dropout(attn_probs), V)       # (32, 8, 10, 10) x (32, 8, 10, 64) -> (32, 8, 10, 64)
+    A = torch.matmul(self.dropout(attn_probs), V)       # (64, 8, 100, 100) x (64, 8, 100, 32) -> (64, 8, 100, 64)
                                                         # (batch_size, n_heads, q_length, k_length) x (batch_size, n_heads, v_length, d_key) -> (batch_size, n_heads, q_length, d_key)
 
     # reshape attention back to (32, 10, 512)
-    A = A.permute(0, 2, 1, 3).contiguous()              # (32, 8, 10, 64) -> (32, 10, 8, 64)
-    A = A.view(batch_size, -1, self.n_heads*self.d_key) # (32, 10, 8, 64) -> (32, 10, 8*64) -> (32, 10, 512) = (batch_size, q_length, d_model)
+    A = A.permute(0, 2, 1, 3).contiguous()              # (64, 8, 100, 32) -> (64, 100, 8, 32)
+    A = A.view(batch_size, -1, self.n_heads*self.d_key) # (64, 100, 8, 32) -> (64, 100, 8*32) -> (64, 100, 256) = (batch_size, q_length, d_model)
         
     # push through the final weight layer
-    output = self.Wo(A)                                 # (32, 10, 512) x (512, 512) = (32, 10, 512) 
+    output = self.Wo(A)                                 # (64, 100, 256) x (256, 256) = (64, 100, 256) 
 
     return output, attn_probs                           # return attn_probs for visualization of the scores
   
@@ -336,7 +335,7 @@ class EncoderLayer(nn.Module):
   def forward(self, src: Tensor, src_mask: Tensor):
     """
     Args:
-        src:          positionally embedded sequences   (batch_size, seq_length, d_model)
+        src:          positionally embedded sequences   (batch_size, seq_length, d_model=256 here)
         src_mask:     mask for the sequences            (batch_size, 1, 1, seq_length)
     Returns:
         src:          sequences after self-attention    (batch_size, seq_length, d_model)
@@ -345,13 +344,13 @@ class EncoderLayer(nn.Module):
     _src, attn_probs = self.attention(src, src, src, src_mask)
 
     # residual add and norm
-    src = self.attn_layer_norm(src + self.dropout(_src))
+    src = self.attn_layer_norm(src + self.dropout(_src))   #(b_size, 100, 256)
     
     # position-wise feed-forward network
-    _src = self.positionwise_ffn(src)
+    _src = self.positionwise_ffn(src)    #(b_size, 100, 256)
 
     # residual add and norm
-    src = self.ffn_layer_norm(src + self.dropout(_src)) 
+    src = self.ffn_layer_norm(src + self.dropout(_src))    #(b_size, 100, 256)
 
     return src, attn_probs
 
@@ -390,7 +389,7 @@ class Encoder(nn.Module):
 
     self.attn_probs = attn_probs
 
-    return src
+    return src    ##(b_size, 100, 256)
   
 class DecoderLayer(nn.Module):
 
@@ -423,8 +422,8 @@ class DecoderLayer(nn.Module):
   def forward(self, trg: Tensor, src: Tensor, trg_mask: Tensor, src_mask: Tensor):
     """
     Args:
-        trg:          embedded sequences                (batch_size, trg_seq_length, d_model)
-        src:          embedded sequences                (batch_size, src_seq_length, d_model)
+        trg:          embedded sequences                (batch_size, trg_seq_length=99, d_model=256)
+        src:          embedded sequences                (batch_size, src_seq_length=100, d_model)
         trg_mask:     mask for the sequences            (batch_size, 1, trg_seq_length, trg_seq_length)
         src_mask:     mask for the sequences            (batch_size, 1, 1, src_seq_length)
 
@@ -438,7 +437,7 @@ class DecoderLayer(nn.Module):
     # residual add and norm
     trg = self.masked_attn_layer_norm(trg + self.dropout(_trg))
     
-    # pass trg and src embeddings through multi-head attention
+    # pass trg and src embeddings through multi-head attention  #this is cross attention where Q comes from trg sentence and K, V comes from src sentence (no masking here)
     _trg, attn_probs = self.attention(trg, src, src, src_mask)
 
     # residual add and norm
@@ -517,40 +516,26 @@ class Transformer(nn.Module):
 
     self.encoder = encoder
     self.decoder = decoder
-    self.src_embed = src_embed
-    self.trg_embed = trg_embed
+    self.src_embed = src_embed  #nn.Sequential(src_embed, pos_enc)
+    self.trg_embed = trg_embed   #nn.Sequential(src_embed, pos_enc)
     self.device = device
     self.src_pad_idx = src_pad_idx
     self.trg_pad_idx = trg_pad_idx
     
   def make_src_mask(self, src: Tensor):
-    """
-    Args:
-        src:          raw sequences with padding        (batch_size, seq_length)              
-    
-    Returns:
-        src_mask:     mask for each sequence            (batch_size, 1, 1, seq_length)
-    """
     # assign 1 to tokens that need attended to and 0 to padding tokens, then add 2 dimensions
     src_mask = (src != self.src_pad_idx).unsqueeze(1).unsqueeze(2)
 
     return src_mask
 
   def make_trg_mask(self, trg: Tensor):
-    """
-    Args:
-        trg:          raw sequences with padding        (batch_size, seq_length)              
-    
-    Returns:
-        trg_mask:     mask for each sequence            (batch_size, 1, seq_length, seq_length)
-    """
 
-    seq_length = trg.shape[1]
+    seq_length = trg.shape[1]  #99
 
-    # assign True to tokens that need attended to and False to padding tokens, then add 2 dimensions
+    # assign True to tokens that need attended to and False to padding tokens, then add 2 dimensions (padding token, we have this in encoder i.e src mask as well)
     trg_mask = (trg != self.trg_pad_idx).unsqueeze(1).unsqueeze(2) # (batch_size, 1, 1, seq_length)
 
-    # generate subsequent mask
+    # generate subsequent mask (lookahead mask)
     trg_sub_mask = torch.tril(torch.ones((seq_length, seq_length), device=self.device)).bool() # (batch_size, 1, seq_length, seq_length)
 
     # bitwise "and" operator | 0 & 0 = 0, 1 & 1 = 1, 1 & 0 = 0
@@ -558,15 +543,8 @@ class Transformer(nn.Module):
 
     return trg_mask
 
-  def forward(self, src: Tensor, trg: Tensor):
-    """
-    Args:
-        trg:          raw target sequences              (batch_size, trg_seq_length)
-        src:          raw src sequences                 (batch_size, src_seq_length)
-    
-    Returns:
-        output:       sequences after decoder           (batch_size, trg_seq_length, output_dim)
-    """
+  def forward(self, src: Tensor, trg: Tensor):   #src: batch of source lang sentences,  trg: batch of target lang sentences
+    # src shape: (b_size, 100) , trg_shape: (b_size, 99) where src_seq_len=99, trg_seq_len=99
 
     # create source and target masks     
     src_mask = self.make_src_mask(src) # (batch_size, 1, 1, src_seq_length)
@@ -578,44 +556,21 @@ class Transformer(nn.Module):
     # decoder output and attention probabilities
     output = self.decoder(self.trg_embed(trg), src, trg_mask, src_mask)
 
-    return output
+    return output   #(b_size, trg_seq_len, trg_vocab_size)
   
-def make_model(device, src_vocab, trg_vocab, n_layers: int = 3, d_model: int = 512, 
-               d_ffn: int = 2048, n_heads: int = 8, dropout: float = 0.1, 
-               max_length: int = 5000):
-  """
-    Construct a model when provided parameters.
-
-    Args:
-        src_vocab:    source vocabulary
-        trg_vocab:    target vocabulary
-        n_layers:     Number of Encoder and Decoders 
-        d_model:      dimension of embeddings
-        d_ffn:        dimension of feed-forward network
-        n_heads:      number of heads
-        dropout:      probability of dropout occurring
-        max_length:   maximum sequence length for positional encodings
-
-    Returns:
-        Transformer model based on hyperparameters
-    """
+def get_transformer_model(device, src_vocab, trg_vocab, n_layers=2, n_heads=8, model_dim=256,
+                                   feed_forward_dim=512, max_seq_length=100, dropout = 0.1):
   
-  # create the encoder
-  encoder = Encoder(d_model, n_layers, n_heads, d_ffn, dropout)
+  encoder = Encoder(model_dim, n_layers, n_heads, feed_forward_dim, dropout)
 
-  # create the decoder
-  decoder = Decoder(len(trg_vocab), d_model, n_layers, n_heads, d_ffn, dropout)
+  decoder = Decoder(len(trg_vocab), model_dim, n_layers, n_heads, feed_forward_dim, dropout)
     
-  # create source embedding matrix
-  src_embed = Embeddings(len(src_vocab), d_model)
+  src_embed = Embeddings(len(src_vocab), model_dim)   #source embedding matrix  (src_vocab_len, model_dim) - this is a look up table (embedding for each token in src corpus)
   
-  # create target embedding matrix
-  trg_embed = Embeddings(len(trg_vocab), d_model)
+  trg_embed = Embeddings(len(trg_vocab), model_dim)  #target embedding matrix
   
-  # create a positional encoding matrix
-  pos_enc = PositionalEncoding(d_model, dropout, max_length)
+  pos_enc = PositionalEncoding(model_dim, dropout, max_seq_length)    #positional encoding matrix
 
-  # create the Transformer model
   model = Transformer(encoder, decoder, nn.Sequential(src_embed, pos_enc), 
                       nn.Sequential(trg_embed, pos_enc),
                       src_pad_idx=src_vocab.get_stoi()["<pad>"], 
@@ -632,9 +587,9 @@ def make_model(device, src_vocab, trg_vocab, n_layers: int = 3, d_model: int = 5
 def train_network(args, train_dataset, val_dataset, test_dataset):
     training_start_time = time.time()
 
-    LM_model = make_model(device, vocab_src, vocab_trg,
-                   n_layers=2, n_heads=8, d_model=256,
-                   d_ffn=512, max_length=50)
+    LM_model = get_transformer_model(device, vocab_src, vocab_trg,
+                                   n_layers=2, n_heads=8, model_dim=256,
+                                   feed_forward_dim=512, max_seq_length=100)
     
     LM_model = LM_model.to(device)
 
@@ -759,7 +714,7 @@ test_en = load_text_data(test_en_path)  #1305 sentences
 test_fr = load_text_data(test_fr_path)
 
 if not os.path.exists("vocab.pt"):
-    vocab_src = build_vocabulary(train_en, val_en, test_en, spacy_eng, spacy_fr, index=0)    #build vocab for eng lang
+    vocab_src = build_vocabulary(train_en, val_en, test_en, spacy_eng, spacy_fr, index=0)    #build vocab for eng lang (give index to each word in corpus)
     vocab_trg = build_vocabulary(train_fr, val_fr, test_fr, spacy_eng, spacy_fr, index=1)     #build vocab for french lang
 
     torch.save((vocab_src, vocab_trg), "vocab.pt")
@@ -783,20 +738,12 @@ train_data_fr = data_process(train_fr, spacy_fr, index = 1)
 val_data_fr = data_process(val_fr, spacy_fr, index = 1)
 test_data_fr = data_process(test_fr, spacy_fr, index = 1)
 
-SOS_IDX = vocab_trg['<sos>']
-EOS_IDX = vocab_trg['<eos>']
-PAD_IDX = vocab_trg['<pad>']
+SOS_IDX = vocab_trg['<sos>']    #0
+EOS_IDX = vocab_trg['<eos>']    #1
+PAD_IDX = vocab_trg['<pad>']    #2
 
 def generate_batch(data_batch):
-  """
-    Process indexed-sequences by adding <bos>, <eos>, and <pad> tokens.
 
-    Args:
-        data_batch:     German-English indexed-sentence pairs
-    
-    Returns:
-        two batches:    one for German and one for English
-  """
   eng_batch, fr_batch = [], []
 
   # for each sentence
@@ -818,7 +765,7 @@ def generate_batch(data_batch):
     
   return torch.stack(eng_batch), torch.stack(fr_batch)
 
-MAX_PADDING = 50
+MAX_PADDING = 100
 BATCH_SIZE = 128
 
 # Combine English and French data for train, val, and test
@@ -826,11 +773,33 @@ train_data = list(zip(train_data_en, train_data_fr))
 val_data = list(zip(val_data_en, val_data_fr))
 test_data = list(zip(test_data_en, test_data_fr))
 
+eng_sentences_below_50_words = 0
+fr_sentences_below_50_words = 0
+eng_sentences_below_100_words = 0
+fr_sentences_below_100_words = 0
+eng_sentences_below_500_words = 0
+fr_sentences_below_500_words = 0
+
 max_eng_len = 0
 max_eng_sent_idx = 0
 max_fr_len = 0
 max_fr_sent_idx = 0
 for i, (eng_item, fr_item) in enumerate(train_data):
+    if len(eng_item) <= 50:
+        eng_sentences_below_50_words += 1   #28715
+    if len(fr_item) <= 50:
+        fr_sentences_below_50_words += 1    #28321
+
+    if len(eng_item) <= 100:
+        eng_sentences_below_100_words += 1    #29949 (use MAX_PADDING  as 100 -- meaning including <pad> tokens, sentence should have 100 tokens)
+    if len(fr_item) <= 100:
+        fr_sentences_below_100_words += 1     #29911
+
+    if len(eng_item) <= 500:
+        eng_sentences_below_500_words += 1     #29998
+    if len(fr_item) <= 500:
+        fr_sentences_below_500_words += 1      #29998
+
     if len(eng_item) > max_eng_len:
         max_eng_len = len(eng_item)
         max_eng_sent_idx = i    #20214 sentence has max len : train_en[20214]
@@ -842,7 +811,7 @@ train_loader = DataLoader(to_map_style_dataset(train_data), batch_size=BATCH_SIZ
                         shuffle=True, drop_last=True, collate_fn=generate_batch)
 # train_iter = iter(train_iter)
 # batch = next(train_iter)
-# batch[0].shape and batch[1].shape: torch.Size([128, 20])
+# batch[0].shape and batch[1].shape: torch.Size([128, 100])
 
 valid_loader = DataLoader(to_map_style_dataset(val_data), batch_size=BATCH_SIZE,
                         shuffle=True, drop_last=True, collate_fn=generate_batch)
